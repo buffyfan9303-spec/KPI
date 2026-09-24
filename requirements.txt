@@ -1,0 +1,15 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+transformers
+stable-baselines3
+gymnasium
+pandas
+numpy
+requests
+websockets
+redis>=5
+python-dotenv
+pykrx
+finance-datareader
+yfinance
+pytest

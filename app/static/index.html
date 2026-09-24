@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha 대시보드</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#14171c; --muted:#6b7280; --line:#e3e6ea; --accent:#1f4fd1; --on-accent:#fff; --hold:#9aa1ac; --bad:#c2410c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#171a21; --fg:#e8eaee; --muted:#9aa1ac; --line:#2a2f39; --accent:#6d8fff; --on-accent:#0f1115; --hold:#5c6370; --bad:#fb923c; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
+  header b { font-size:17px; }
+  .tag { font-size:12px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); color:var(--muted); margin-left:8px; }
+  main { max-width:960px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; }
+  h2 { font-size:15px; margin:0 0 12px; }
+  .form { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px; align-items:end; }
+  label { font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
+  input { width:100%; padding:10px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; }
+  button { padding:10px 14px; font-size:15px; border:0; border-radius:8px; background:var(--accent); color:var(--on-accent); cursor:pointer; }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; }
+  .kpi { border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .kpi span { font-size:12px; color:var(--muted); display:block; }
+  .kpi strong { font-size:20px; font-variant-numeric:tabular-nums; }
+  .kpi small { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .chart { position:relative; height:320px; }
+  #msg { color:var(--muted); font-size:13px; min-height:18px; }
+  .note { font-size:12px; color:var(--muted); margin:8px 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <div><b>Engineered Alpha</b><span class="tag">모의 · 백테스트</span></div>
+  <form method="post" action="/logout"><button class="ghost" type="submit">로그아웃</button></form>
+</header>
+<main>
+  <section class="card">
+    <h2>3단계 마켓 타이밍 백테스트 (Hysteresis)</h2>
+    <div class="form">
+      <div><label for="symbol">종목코드</label><input id="symbol" value="069500" inputmode="numeric" maxlength="6"></div>
+      <div><label for="ma">이동평균(일)</label><input id="ma" type="number" value="60" min="5" max="250"></div>
+      <div><label for="band">버퍼(%)</label><input id="band" type="number" value="1" min="0" max="10" step="0.5"></div>
+      <div><label for="start">시작일</label><input id="start" type="date" value="2015-01-01"></div>
+      <button id="run">실행</button>
+    </div>
+    <div id="msg" role="status"></div>
+  </section>
+
+  <section class="kpis">
+    <div class="kpi"><span>전략 CAGR</span><strong id="s-cagr">-</strong> <small id="h-cagr"></small></div>
+    <div class="kpi"><span>전략 MDD</span><strong id="s-mdd">-</strong> <small id="h-mdd"></small></div>
+    <div class="kpi"><span>누적 수익</span><strong id="s-total">-</strong> <small id="h-total"></small></div>
+    <div class="kpi"><span>매매 횟수</span><strong id="trades">-</strong></div>
+  </section>
+
+  <section class="card">
+    <h2>자산 곡선 (시작 = 1)</h2>
+    <div class="chart"><canvas id="eq" aria-label="전략과 단순보유 자산곡선"></canvas></div>
+    <p class="note">비용 반영: 슬리피지 0.5%(매수·매도), 매도 거래세 0.20%. 신호는 다음 거래일부터 적용.</p>
+  </section>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  const pct = v => (v * 100).toFixed(1) + "%";
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  let chart;
+
+  async function run() {
+    $("msg").textContent = "계산 중…";
+    const q = new URLSearchParams({ symbol: $("symbol").value, ma: $("ma").value,
+      band: ($("band").value / 100).toString(), start: $("start").value });
+    const r = await fetch("/api/backtest?" + q);
+    if (r.status === 401) return location.reload();
+    if (!r.ok) { $("msg").textContent = "오류: 입력값을 확인해 주세요 (" + r.status + ")"; return; }
+    const d = await r.json(), s = d.metrics.strategy, h = d.metrics.hold;
+    $("s-cagr").textContent = pct(s.cagr);   $("h-cagr").textContent = "보유 " + pct(h.cagr);
+    $("s-mdd").textContent = pct(s.mdd);     $("h-mdd").textContent = "보유 " + pct(h.mdd);
+    $("s-total").textContent = pct(s.total); $("h-total").textContent = "보유 " + pct(h.total);
+    $("trades").textContent = d.trades;
+    $("msg").textContent = d.dates[0] + " ~ " + d.dates.at(-1);
+    chart?.destroy();
+    chart = new Chart($("eq"), {
+      type: "line",
+      data: { labels: d.dates, datasets: [
+        { label: "전략", data: d.strategy, borderColor: css("--accent"), borderWidth: 2, pointRadius: 0 },
+        { label: "단순 보유", data: d.hold, borderColor: css("--hold"), borderWidth: 1.5, pointRadius: 0 } ] },
+      options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+        scales: { x: { ticks: { maxTicksLimit: 6, color: css("--muted") }, grid: { display: false } },
+                  y: { ticks: { color: css("--muted") }, grid: { color: css("--line") } } },
+        plugins: { legend: { labels: { color: css("--fg"), boxWidth: 12 } } } }
+    });
+  }
+  $("run").onclick = run;
+  run();
+</script>
+</body>
+</html>

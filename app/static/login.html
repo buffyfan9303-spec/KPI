@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha 로그인</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#14171c; --muted:#6b7280; --line:#e3e6ea; --accent:#1f4fd1; --on-accent:#fff; --bad:#c2410c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#171a21; --fg:#e8eaee; --muted:#9aa1ac; --line:#2a2f39; --accent:#6d8fff; --on-accent:#0f1115; --bad:#fb923c; } }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100svh; display:grid; place-items:center; background:var(--bg); color:var(--fg);
+         font:16px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; padding:16px; }
+  form { width:100%; max-width:340px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p { margin:0 0 20px; color:var(--muted); font-size:14px; }
+  label { display:block; font-size:14px; margin-bottom:6px; }
+  input { width:100%; padding:12px; font-size:16px; border:1px solid var(--line); border-radius:10px; background:transparent; color:inherit; }
+  button { width:100%; margin-top:14px; padding:12px; font-size:16px; border:0; border-radius:10px; background:var(--accent); color:var(--on-accent); cursor:pointer; }
+  #err { color:var(--bad); font-size:14px; min-height:20px; margin-top:10px; }
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <h1>Engineered Alpha</h1>
+  <p>자동매매 대시보드</p>
+  <label for="pw">비밀번호</label>
+  <input id="pw" name="password" type="password" autocomplete="current-password" required autofocus>
+  <button type="submit">로그인</button>
+  <div id="err" role="alert"></div>
+</form>
+<script>
+  const e = new URLSearchParams(location.search).get("e");
+  if (e) document.getElementById("err").textContent =
+    e === "lock" ? "5회 실패로 5분간 잠겼어요." : "비밀번호가 틀렸어요.";
+</script>
+</body>
+</html>

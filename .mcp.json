@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "kis-code-assistant": {
+      "command": "npx",
+      "args": ["-y", "@koreainvestment/kis-code-assistant-mcp"],
+      "env": {
+        "UV_PATH": "C:\\Users\\buffy\\AppData\\Roaming\\Python\\Python314\\Scripts\\uv.exe"
+      }
+    }
+  }
+}
