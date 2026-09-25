@@ -28,8 +28,9 @@
 | uv 0.12.18 (`C:\Users\buffy\AppData\Roaming\Python\Python314\Scripts\uv.exe`) | 기능 실행 확인 | `uv --version` |
 | KIS Trading MCP (AI가 직접 주문) | 이번 범위 제외 | 실전 키 필수·런타임 코드 다운로드 실행 → 자동매매 코드엔 불필요 |
 | KIS 앱키/시크릿·계좌 | **설정·인증 필요 (사용자)** | KIS Developers에서 발급 → `.env` |
-| FinBERT 모델 가중치 | 이번 범위 제외 | 구현 시 한국어 모델 선택 후 다운로드 |
-| pykrx KRX 로그인(`KRX_ID/KRX_PW`) | 선택 사항 | 없어도 FDR로 시세 수집 가능 |
+| 한국어 FinBERT `snunlp/KR-FinBert-SC` | 기능 실행 확인 | 뉴스 문장 긍정/부정 판정 성공 (라이선스 표기 없음 → 개인 연구용) |
+| python-kis·opendartreader·aiolimiter·skfolio | import 확인 | 2026-09-25 설치 |
+| pykrx KRX 로그인(`KRX_ID/KRX_PW`) | **PER/PBR에 필요** | 로그인 없으면 `get_market_fundamental` 빈 값(2026-09-25 확인). 시세는 FDR로 가능 |
 
 ## KIS 공식 저장소 확인 (koreainvestment/open-trading-api, b4e6249, 2026-08-26)
 
@@ -46,11 +47,13 @@
 |---|---|
 | `app/web.py` | FastAPI. 비밀번호 로그인(5회 실패 시 5분 잠금), 세션 쿠키(Secure·SameSite=Strict·12시간), `/api/backtest` 입력 검증, API 문서 페이지 비활성 |
 | `app/backtest.py` | 다음 날 체결, 슬리피지 0.5%, 매도세 0.20%, CAGR·MDD |
-| `app/timing.py` | 3단계 Hysteresis — **사용자 구현 대기** (`test_core.py` 2개가 기준) |
-| `app/static/*.html` | 로그인·대시보드, 모바일 우선, 다크 모드 |
+| `app/timing.py` | 3단계 Hysteresis (±버퍼 밖으로 나갈 때만 전환, 버퍼 안은 직전 상태 유지) — 구현·테스트 통과 |
+| `app/static/index.html` | 다크 대시보드: 관심종목(추세선·추가/삭제), 상승/하락 상위 6(시총 500억↑), 종목 차트(1개월~3년), 시장 지표(코스피·코스닥·VIX·원/달러, VIX 20%↑ 경고), 뉴스(Google RSS), 종목 검색(주식+ETF), 백테스트. 상승=빨강·하락=파랑. 1000px 미만은 햄버거 메뉴 |
+| `app/static/login.html` | 로그인 |
+| API | `/api/market` `/api/watchlist`(GET·POST·DELETE, `~/KIS/config/watchlist.json`, 최대 12) `/api/search` `/api/chart` `/api/news` — 모두 로그인 필요, 종목코드 `^[0-9A-Z]{6}$` |
 | `C:\Users\buffy\KIS\config\.env` | `DASH_PASSWORD`, `SESSION_SECRET` (OneDrive 밖, 본인 계정만 접근) |
 
-검증: 로그인·401·잠금·로그아웃 흐름 테스트 통과, 비용 테스트 통과, pyright 0 errors. Hysteresis 미구현이라 백테스트 화면은 아직 오류(500).
+검증: 로그인·401·잠금·로그아웃 흐름 테스트 통과, 비용 테스트 통과, pyright 0 errors. 백테스트 실측(KODEX 200, 2015-01~2026-09, 60일선·±1%, 비용 포함): 전략 CAGR 9.5%·MDD -34.7%·매매 73회 / 단순 보유 CAGR 16.1%·MDD -40.8%. 3단계 단독으로는 보유보다 수익이 낮고 낙폭만 약간 줄었다.
 
 실행: `run_web.ps1` → 이 PC에서 http://127.0.0.1:8000 (로컬에서 쿠키가 안 붙으면 `.env`에 `COOKIE_SECURE=0`, Tailscale HTTPS로 쓸 땐 1)
 
@@ -59,6 +62,42 @@
 2. 관리 콘솔에서 MagicDNS·HTTPS 인증서 켜기
 3. PC에서 `tailscale serve --bg 8000` → 휴대폰에서 `https://<PC이름>.<tailnet>.ts.net`
 4. `tailscale funnel`은 쓰지 말 것(인터넷 전체 공개됨)
+
+## 지인 계정 (다중 사용자, 2026-09-25)
+
+| 파일 | 역할 |
+|---|---|
+| `app/accounts.py` | SQLite `~/KIS/config/alpha.db`(OneDrive 밖). 계정(scrypt 해시), KIS 앱키·시크릿·계좌(Fernet 암호화), 개인 설정, 관심종목 |
+| `app/kis.py` | 모의투자 토큰 발급으로 키 확인만 (토큰 저장 안 함). 실제 호출은 키가 없어 미확인 |
+| `test_accounts.py` | 비밀번호 변경 강제 → 동의 → 키 암호화·가림 → 사용자 간 분리 → 관리자 권한 → 세션 끊김 → 로그인 잠금 |
+
+운영 방법
+1. 처음 실행하면 `admin` 계정이 기존 `DASH_PASSWORD`로 만들어지고, 옛 관심종목이 옮겨진다.
+2. 관리자 화면(내 계정 아래 "지인 계정 관리")에서 아이디를 만들면 임시 비밀번호가 **한 번만** 보인다. 본인에게 직접 전달한다.
+3. 지인은 첫 로그인 때 비밀번호 변경 → 동의 5개 체크 → 본인 KIS **모의투자** 앱키 등록.
+4. 관리자는 다른 사람의 키 값·자동매매 스위치를 볼 수도 바꿀 수도 없다(등록 여부만 보임). 실전 모드는 DB 제약으로 막혀 있다.
+
+주의
+- `.env`의 `DATA_KEY`를 잃거나 바꾸면 저장된 앱키를 다시 읽을 수 없다. `.env`를 따로 안전하게 백업한다(메신저·클라우드 공유 금지).
+- 이용료·수익 배분을 받지 않는다(자본시장법상 "영업" 해당 소지). 실전 전 법률 상담 권장.
+- 자동매매 스위치는 저장만 된다. 주문 엔진은 아직 없다.
+
+보안 검토 (독립 에이전트, 2026-09-25) — 고친 것: 관리자 비밀번호 초기화로 남의 자동매매를 켜는 문제(High, 초기화 시 동의·키·자동매매 삭제), 로그인 잠금 동시요청 우회·관리자 잠금 공격((아이디,IP)+IP 한도, 스레드 잠금), 관리자끼리 초기화 금지, 입력 길이 제한, 다른 사이트발 POST 차단, 보안 헤더(CSP·X-Frame-Options), DATA_KEY 시작 시 검사.
+2차 수정: `DATA_KEY`를 `.env`에서 Windows 자격 증명 관리자(`alpha-trader`/`DATA_KEY`)로 이동 → 암호화 DB와 분리, 로그아웃하면 모든 기기 세션 종료, 임시 비밀번호 72시간 만료, 메모리 캐시 2,000개 제한·차트 기간 구간화.
+남은 것: 서버 관리자는 DATA_KEY로 누구의 키든 복호화할 수 있다(동의 화면에 명시).
+
+## PC 초기화 대비 백업 (`app/keybackup.py`)
+- 묶는 것: DATA_KEY(자격 증명 관리자) + 계정 DB(`alpha.db`) + `.env`. 복구 비밀번호(12자 이상, scrypt)로 잠가 **구글 드라이브 `G:\내 드라이브\alpha-backup\`** 에 저장한다(드라이브 데스크톱 앱 자동 감지).
+- 파일 안에는 평문이 없다(테스트로 확인). 복구 비밀번호는 PC 밖(휴대폰 메모 등)에 적어 둔다. 비밀번호를 잊으면 복구 불가.
+- 지인 계정을 만들거나 키가 바뀐 뒤에 다시 백업한다(자동 백업 없음: 복구 비밀번호를 저장해 둘 수 없어서).
+- 백업: `C:\Users\buffy\.venvs\alpha-trader\Scripts\python.exe -m app.keybackup export`
+- 새 PC 복구: 저장소·venv 설치 → 구글 드라이브 앱 로그인 → `python -m app.keybackup import "G:\내 드라이브\alpha-backup\<파일>"`
+
+## 모바일 화면 (860px 이하)
+토스증권·Robinhood식 패턴 조사 후 적용: 하단 탭 5개(홈·관심·발견·뉴스·내 계정), 관심종목 리스트 행(이름 | 추세선 | 가격·등락), 시장 지표 가로 스와이프, 홈 상단 자동매매 상태 줄(스위치는 내 계정에만), 뉴스 게이트 '매수 보류'를 관심종목 행에 표시, 터치 영역 44~48px. 데스크톱 화면은 그대로.
+
+## 에이전트 팀
+조사 근거·모델 배정·PDF 중 불가 항목: [docs/AGENT_TEAM.md](docs/AGENT_TEAM.md)
 
 ## 다음 세션 작업 배정
 
@@ -79,6 +118,3 @@
 ```bash
 C:\Users\buffy\.venvs\alpha-trader\Scripts\activate
 ```
-
-Claude Code에 붙여 넣을 문구:
-> `PREP.md`를 읽고 1단계(데이터 수집 + 비용 포함 백테스트 골격)부터 구현해줘. 모의투자만 사용.

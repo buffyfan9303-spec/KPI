@@ -13,3 +13,10 @@ pykrx
 finance-datareader
 yfinance
 pytest
+# 2026-09-25 추가 (설치·import 확인)
+python-kis        # KIS REST/WebSocket (import pykis)
+opendartreader    # DART 공시 (DART_API_KEY 필요)
+aiolimiter        # 비동기 토큰 버킷
+skfolio           # 리스크 패리티
+scipy
+keyring           # DATA_KEY를 Windows 자격 증명 관리자에 보관

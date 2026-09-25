@@ -11,5 +11,14 @@ def hysteresis_position(close: pd.Series, ma: pd.Series, band: float = 0.01) -> 
 
     반환: close와 같은 index의 0/1 float Series.
     """
-    # TODO(사용자): 여기를 구현해 주세요 (5~10줄).
-    raise NotImplementedError
+    upper, lower = ma * (1 + band), ma * (1 - band)
+    state, out = 0.0, []
+    for c, up, lo in zip(close.to_numpy(), upper.to_numpy(), lower.to_numpy()):
+        if up != up:  # NaN: 이동평균이 아직 없으면 현금
+            state = 0.0
+        elif c > up:
+            state = 1.0
+        elif c < lo:
+            state = 0.0
+        out.append(state)  # 버퍼 존에서는 직전 상태 유지
+    return pd.Series(out, index=close.index, dtype=float)

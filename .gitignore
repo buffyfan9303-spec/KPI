@@ -5,3 +5,4 @@ __pycache__/
 *.env
 kis_devlp.yaml
 .impeccable/
+docs_cache/
