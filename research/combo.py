@@ -41,13 +41,15 @@ def blended_cost(weights: dict[str, float], costs: dict[str, float]) -> float:
     return sum(w * costs.get(k, DEFAULT_COST) for k, w in weights.items()) / tot
 
 
-def cppi(curve: pd.Series, safe: pd.Series, floor: float = 0.8, m: float = 4.0, cost: float = DEFAULT_COST) -> pd.Series:
-    """매주 마지막 거래일에 위험 비중을 다시 계산. 오늘 판단 → 다음 날 반영."""
+def cppi(curve: pd.Series, safe: pd.Series, floor: float = 0.8, m: float = 4.0, cost: float = DEFAULT_COST,
+         detail: bool = False):
+    """매주 마지막 거래일에 위험 비중을 다시 계산. 오늘 판단 → 다음 날 반영. detail=True면 (곡선, 위험비중) 반환."""
     r = curve.pct_change().fillna(0.0)
     rs = safe.reindex(curve.index).ffill().pct_change().fillna(0.0)
     week_last = _week_last(pd.DatetimeIndex(curve.index))
-    eq, peak, w, out = 1.0, 1.0, 1.0, []
+    eq, peak, w, out, ws = 1.0, 1.0, 1.0, [], []
     for d in curve.index:
+        ws.append(w)  # 오늘 수익에 적용된 비중(전날 판단)
         eq *= 1 + w * r.loc[d] + (1 - w) * rs.loc[d]
         peak = max(peak, eq)
         if d in week_last:
@@ -55,4 +57,5 @@ def cppi(curve: pd.Series, safe: pd.Series, floor: float = 0.8, m: float = 4.0, 
             eq *= 1 - abs(new_w - w) * cost
             w = new_w
         out.append(eq)
-    return pd.Series(out, index=curve.index)
+    s = pd.Series(out, index=curve.index)
+    return (s, pd.Series(ws, index=curve.index)) if detail else s

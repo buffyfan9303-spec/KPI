@@ -130,8 +130,10 @@ NEEDS = {"HAA": ["SPY", "IWM", "VEA", "VWO", "VNQ", "DBC", "IEF", "TLT", "TIP", 
          "영구포트폴리오": ["SPY", "TLT", "GLD", "BIL"], "60/40": ["SPY", "IEF"], "위험균형": ["SPY", "EFA", "TLT", "IEF", "GLD", "DBC"]}
 
 
-def backtest(rule, signal_px: pd.DataFrame, trade_px: pd.DataFrame, start: str, end: str | None = None) -> pd.Series:
-    """signal_px로 월말 신호, trade_px 수익률로 운용(같으면 순수 미국 버전, 다르면 한국 ETF로 매매)."""
+def backtest(rule, signal_px: pd.DataFrame, trade_px: pd.DataFrame, start: str, end: str | None = None,
+             detail: bool = False):
+    """signal_px로 월말 신호, trade_px 수익률로 운용(같으면 순수 미국 버전, 다르면 한국 ETF로 매매).
+    detail=True면 {curve, cost(일별 비용 비율), alloc(월말→비중 dict)}를 돌려준다."""
     sp = signal_px.ffill()
     tr = trade_px.ffill().pct_change().fillna(0.0)
     days = tr.index[(tr.index >= pd.Timestamp(start)) & ((end is None) | (tr.index <= pd.Timestamp(end or "2100")))]
@@ -139,8 +141,9 @@ def backtest(rule, signal_px: pd.DataFrame, trade_px: pd.DataFrame, start: str, 
     months = pd.Series(days, index=days).groupby(days.to_period("M")).max()
     rebal = set(months.to_numpy())
     w = pd.Series(dtype=float)
-    eq, curve = 1.0, []
+    eq, curve, cost, alloc = 1.0, [], [], {}
     for d in days:
+        c = 0.0
         if len(w):
             rr = 1 + tr.loc[d, w.index]
             g = float((w * rr).sum())
@@ -151,7 +154,13 @@ def backtest(rule, signal_px: pd.DataFrame, trade_px: pd.DataFrame, start: str, 
             tgt = tgt.groupby(level=0).sum()
             allc = w.index.union(tgt.index)
             turn = float((pd.Series(tgt.reindex(allc)).fillna(0) - pd.Series(w.reindex(allc)).fillna(0)).abs().sum())
-            eq *= 1 - turn * COST
+            c = turn * COST
+            eq *= 1 - c
             w = tgt
+            alloc[d] = {str(k): float(v) for k, v in tgt.items()}
         curve.append(eq)
-    return pd.Series(curve, index=days)
+        cost.append(c)
+    s = pd.Series(curve, index=days)
+    if detail:
+        return {"curve": s, "cost": pd.Series(cost, index=days), "alloc": alloc}
+    return s

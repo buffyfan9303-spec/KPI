@@ -265,6 +265,7 @@ def run(cfg: Config, log: bool = True) -> dict:
     val, peak = pd.Series(dtype=float), pd.Series(dtype=float)  # 손절/샹들리에용: 매수 후 누적값과 그 고점
     stopped: set[str] = set()
     eq, curve, turn_total, picks = 1.0, [], 0.0, {}
+    cost_log, turn_log = [], []  # 일별 비용 비율·회전율(sim2020 원화 비용 집계용)
     prev_e = 0.0
     track_val = cfg.stop_loss > 0 or cfg.exit in ("chandelier_losers", "chandelier_regime")
     age = pd.Series(dtype=float)  # 매수 후 경과 거래일(stop_grace용)
@@ -278,6 +279,7 @@ def run(cfg: Config, log: bool = True) -> dict:
         bull = regime_signal(idx) if cfg.exit == "chandelier_regime" else pd.Series(True, index=idx)
     for d in idx:
         r = R.loc[d]
+        cday = tday = 0.0
         # 1) 오늘 수익 반영(정지·폐지 NaN → 0)
         if len(w):
             rr = 1 + r.reindex(w.index).fillna(0.0)
@@ -297,7 +299,9 @@ def run(cfg: Config, log: bool = True) -> dict:
                 if hit:
                     sold = float(w[hit].sum())
                     eq *= 1 - sold * (cfg.slippage + sell_tax(d))
+                    cday += sold * (cfg.slippage + sell_tax(d))
                     turn_total += sold
+                    tday += sold
                     w = w.drop(hit)
                     stopped.update(hit)
             if cfg.exit in ("chandelier_losers", "chandelier_regime") and d in chand_close.index:
@@ -308,7 +312,9 @@ def run(cfg: Config, log: bool = True) -> dict:
                 if hit:
                     sold = float(w[hit].sum())
                     eq *= 1 - sold * (cfg.slippage + sell_tax(d))
+                    cday += sold * (cfg.slippage + sell_tax(d)) + sold * 0.0005
                     turn_total += sold
+                    tday += sold
                     w = w.drop(hit)
                     stopped.update(hit)
                     dest = PARK_SAFE if bear else PARK_ETF
@@ -350,17 +356,22 @@ def run(cfg: Config, log: bool = True) -> dict:
             buy, sell = diff.clip(lower=0).sum(), (-diff).clip(lower=0).sum()
             cost = (buy + sell) * cfg.slippage + sell * sell_tax(d)
             eq *= 1 - cost
+            cday += cost
             turn_total += buy + sell
+            tday += buy + sell
             w = tgt
         prev_e = e
         curve.append(eq)
+        cost_log.append(cday)
+        turn_log.append(tday)
     s = pd.Series(curve, index=idx)
     m = metrics(s)
     m.update(turnover_per_year=round(turn_total / max((idx[-1] - idx[0]).days / 365.25, 1e-9), 2))
     if log:
         row = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "config": json.dumps(asdict(cfg), ensure_ascii=False), **m}
         pd.DataFrame([row]).to_csv(TRIALS, mode="a", header=not TRIALS.exists(), index=False, encoding="utf-8")
-    return {"metrics": m, "curve": s, "picks": picks}
+    return {"metrics": m, "curve": s, "picks": picks,
+            "cost": pd.Series(cost_log, index=idx), "turnover": pd.Series(turn_log, index=idx)}
 
 
 def metrics(s: pd.Series) -> dict:
@@ -377,6 +388,17 @@ def metrics(s: pd.Series) -> dict:
             "yearly": {str(k.year): round(float(v), 3) for k, v in yearly.items()}}
 
 
+def rotate_signal(curve: pd.Series, rb: pd.Series, lookback: int = 252) -> pd.Series:
+    """rotate()의 신호만(순수 함수): 월말에 전략 lookback일 수익 ≥ 벤치마크면 1(전략), 아니면 0(ETF). 다음 날부터 적용."""
+    bcurve = (1 + rb.reindex(curve.index).fillna(0.0)).cumprod()
+    mom_s, mom_b = curve / curve.shift(lookback) - 1, bcurve / bcurve.shift(lookback) - 1
+    ci = pd.DatetimeIndex(curve.index)
+    month_end = ci.to_series().groupby(ci.to_period("M")).transform("max") == ci
+    sig = pd.Series(np.nan, index=curve.index)
+    sig[month_end] = (mom_s >= mom_b)[month_end].astype(float)
+    return sig.ffill().fillna(1.0).shift(1).fillna(1.0)  # 월말 판단 → 다음 날부터
+
+
 def rotate(curve: pd.Series, name: str, lookback: int = 252, bench: str = "069500",
            switch_cost: float = 0.025, log: bool = True) -> dict:
     """팩터 모멘텀 전환: 매월 말, 전략의 최근 lookback일 수익이 KOSPI200 ETF보다 낮으면 ETF로 갈아탄다.
@@ -385,13 +407,7 @@ def rotate(curve: pd.Series, name: str, lookback: int = 252, bench: str = "06950
     rs = curve.pct_change().fillna(0.0)
     etf = pd.Series(fdr.DataReader(bench, "2014-01-01")["Close"], dtype=float)  # ETF는 marcap에 없어 따로 받음(분배금 제외)
     rb = etf.pct_change().reindex(curve.index).fillna(0.0)
-    bcurve = (1 + rb).cumprod()
-    mom_s, mom_b = curve / curve.shift(lookback) - 1, bcurve / bcurve.shift(lookback) - 1
-    ci = pd.DatetimeIndex(curve.index)
-    month_end = ci.to_series().groupby(ci.to_period("M")).transform("max") == ci
-    sig = pd.Series(np.nan, index=curve.index)
-    sig[month_end] = (mom_s >= mom_b)[month_end].astype(float)
-    sig = sig.ffill().fillna(1.0).shift(1).fillna(1.0)  # 월말 판단 → 다음 날부터
+    sig = rotate_signal(curve, rb, lookback)
     r = np.where(sig == 1, rs, rb)
     r = r - sig.diff().abs().fillna(0.0).to_numpy() * switch_cost
     s = pd.Series((1 + r).cumprod(), index=curve.index)
@@ -401,7 +417,7 @@ def rotate(curve: pd.Series, name: str, lookback: int = 252, bench: str = "06950
         row = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"),
                "config": json.dumps({"name": name, "rotate_lookback": lookback, "bench": bench}, ensure_ascii=False), **m}
         pd.DataFrame([row]).to_csv(TRIALS, mode="a", header=not TRIALS.exists(), index=False, encoding="utf-8")
-    return {"metrics": m, "curve": s}
+    return {"metrics": m, "curve": s, "sig": sig}
 
 
 def vol_target(curve: pd.Series, name: str, target: float = 0.20, window: int = 60, cost: float = 0.01,
@@ -421,7 +437,7 @@ def vol_target(curve: pd.Series, name: str, target: float = 0.20, window: int = 
         row = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"),
                "config": json.dumps({"name": name, "vol_target": target, "window": window}, ensure_ascii=False), **m}
         pd.DataFrame([row]).to_csv(TRIALS, mode="a", header=not TRIALS.exists(), index=False, encoding="utf-8")
-    return {"metrics": m, "curve": s}
+    return {"metrics": m, "curve": s, "weight": w}
 
 
 def etf_returns(code: str, idx: pd.DatetimeIndex) -> pd.Series:
